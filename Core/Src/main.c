@@ -24,7 +24,9 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-
+#include <stdio.h>
+#include <shell.h>
+#include <drv_uart1.h>
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -39,6 +41,9 @@
 #define TASK2_PRIORITY 2
 #define TASK1_DELAY 1
 #define TASK2_DELAY 2
+#define QUEUE_LENGTH 5
+#define ITEM_SIZE sizeof(uint32_t)
+
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -50,9 +55,15 @@
 
 /* USER CODE BEGIN PV */
 
+TaskHandle_t taskTakeHandle;
 SemaphoreHandle_t xSemaphore;
-BaseType_t ret;
+QueueHandle_t xQueue;
 
+SemaphoreHandle_t xMutex;
+
+h_shell_t h_shell;
+
+TaskHandle_t xLedTaskHandle;
 
 /* USER CODE END PV */
 
@@ -71,7 +82,6 @@ int __io_putchar(int ch) {
 	return ch;
 }
 
-
 void BlinkTask(void *argument)
 {
 	for(;;)
@@ -82,30 +92,30 @@ void BlinkTask(void *argument)
 	}
 }
 
-void taskGive(void *argument)
+void taskGive(void *pvParameters)
 {
-	for(;;)
+	uint32_t timerValue = 0; // Valeur à envoyer dans la queue
+	for (;;)
 	{
-		printf("taskGive : avant xSemaphoreGive\r\n");
-		xSemaphoreGive(xSemaphore);
-		printf("taskGive : après xSemaphoreGive\r\n");
-		vTaskDelay(100 / portTICK_PERIOD_MS);
+		printf("taskGive : avant envoi à la queue\r\n");
+		if (xQueueSend(xQueue, &timerValue, portMAX_DELAY) == pdPASS)
+		{
+			printf("taskGive : valeur envoyée : %u\r\n", timerValue);
+		}
+		timerValue++;
+		vTaskDelay(pdMS_TO_TICKS(100));
 	}
 }
 
-void taskTake(void *argument)
+void taskTake(void *pvParameters)
 {
-	for(;;)
+	uint32_t receivedValue;
+	for (;;)
 	{
-		printf("taskTake : en attente de sémaphore...\r\n");
-		if (xSemaphoreTake(xSemaphore, 1000 / portTICK_PERIOD_MS) == pdTRUE)
+		printf("taskTake : en attente de valeur dans la queue...\r\n");
+		if (xQueueReceive(xQueue, &receivedValue, portMAX_DELAY) == pdPASS)
 		{
-			printf("taskTake : sémaphore pris !\r\n");
-		}
-		else
-		{
-			printf("Erreur : timeout sur le sémaphore. Reset du système.\r\n");
-			NVIC_SystemReset();
+			printf("taskTake : valeur reçue : %u\r\n", receivedValue);
 		}
 	}
 }
@@ -113,11 +123,69 @@ void taskTake(void *argument)
 void task_bug(void * pvParameters)
 {
 	int delay = (int) pvParameters;
-	for(;;)
+	for (;;)
 	{
-		printf("Je suis %s et je m'endors pour %d ticks\r\n", pcTaskGetName(NULL), delay);
-		vTaskDelay(delay);
+		if (xSemaphoreTake(xMutex, portMAX_DELAY) == pdTRUE)
+		{
+			printf("Je suis %s et je m'endors pour %d ticks\r\n",
+					pcTaskGetName(NULL), delay);
+			xSemaphoreGive(xMutex);
+		}
+		vTaskDelay(pdMS_TO_TICKS(delay));
 	}
+}
+
+int fonction(int argc, char ** argv)
+{
+	printf("Je suis une fonction bidon\r\n");
+
+	return 0;
+}
+
+void led_task(void *pvParameters){
+	uint32_t period = (uint32_t) pvParameters;
+	TickType_t xLastWakeTime;
+	xLastWakeTime = xTaskGetTickCount();
+	for (;;) {
+		if (period == 0) {
+			HAL_GPIO_WritePin(LED_GPIO_Port,LED_Pin, GPIO_PIN_RESET); // LED éteinte
+		} else {
+			HAL_GPIO_TogglePin(LED_GPIO_Port, LED_Pin);
+			vTaskDelay(pdMS_TO_TICKS(period));
+		}
+	}
+}
+
+int sh_led(int argc, char ** argv)
+{
+	if (argc < 2) {
+		int size;
+		size = snprintf(h_shell.print_buffer, BUFFER_SIZE, "Mettre le temps en ms\r\n");
+		h_shell.drv.transmit(h_shell.print_buffer, size);
+		return -1;
+	}
+
+	uint32_t period = atoi(argv[2]);
+
+	if (xLedTaskHandle != NULL) {
+		vTaskDelete(xLedTaskHandle);
+		xLedTaskHandle = NULL;
+	}
+
+	BaseType_t ret = xTaskCreate(led_task, "LED_Task", STACK_SIZE, (void *) period, 1, &xLedTaskHandle);
+	if (ret != pdPASS) {
+		int size;
+		size = snprintf(h_shell.print_buffer, BUFFER_SIZE, "Error: Failed to create LED task\r\n");
+		h_shell.drv.transmit(h_shell.print_buffer, size);
+		return -1;
+	}
+
+	int size;
+	size = snprintf(h_shell.print_buffer, BUFFER_SIZE, "LED blinking with period %d ms\r\n", period);
+	h_shell.drv.transmit(h_shell.print_buffer, size);
+	return 0;
+
+
 }
 
 
@@ -156,6 +224,9 @@ int main(void)
 	/* USER CODE BEGIN 2 */
 
 	//HAL_GPIO_WritePin(LED_GPIO_Port, LED_Pin, GPIO_PIN_SET);
+
+	//BaseType_t ret;
+
 	//xTaskCreate(BlinkTask, "LED_Task", TASK_STACK, NULL, BLINK_TASK_PRIORITY, NULL);
 	//
 	//	xSemaphore = xSemaphoreCreateBinary();
@@ -168,12 +239,39 @@ int main(void)
 	//		vTaskStartScheduler();
 	//	}
 
-	ret = xTaskCreate(task_bug, "Tache 1", STACK_SIZE, (void *) TASK1_DELAY, TASK1_PRIORITY, NULL);
-	configASSERT(pdPASS==ret);
-	ret = xTaskCreate(task_bug, "Tache 2", STACK_SIZE, (void *) TASK2_DELAY, TASK2_PRIORITY, NULL);
-	configASSERT(pdPASS==ret);
 
-	vTaskStartScheduler();
+	//	xQueue = xQueueCreate(QUEUE_LENGTH, ITEM_SIZE);
+	//	configASSERT(xQueue!=NULL);
+	//
+	//    ret = xTaskCreate(taskTake, "taskTake", STACK_SIZE, NULL, 2, &taskTakeHandle);
+	//    configASSERT(ret == pdPASS);
+	//
+	//    ret = xTaskCreate(taskGive, "taskGive", STACK_SIZE, NULL, 1, NULL);
+	//    configASSERT(ret == pdPASS);
+	//
+	//    vTaskStartScheduler();
+
+	//
+	//	xMutex = xSemaphoreCreateMutex();
+	//	configASSERT(xMutex != NULL);
+	//
+	//	ret = xTaskCreate(task_bug, "Tache 1", STACK_SIZE, (void *) TASK1_DELAY, TASK1_PRIORITY, NULL);
+	//	configASSERT(pdPASS == ret);
+	//	ret = xTaskCreate(task_bug, "Tache 2", STACK_SIZE, (void *) TASK2_DELAY, TASK2_PRIORITY, NULL);
+	//	configASSERT(pdPASS == ret);
+
+
+	//vTaskStartScheduler();
+
+	h_shell.drv.receive = drv_uart1_receive;
+	h_shell.drv.transmit = drv_uart1_transmit;
+
+	shell_init(&h_shell);
+	shell_add(&h_shell, 'f', fonction, "Une fonction inutile");
+	shell_add(&h_shell, 'l', sh_led, "LED blink with period in ms");
+	shell_run(&h_shell);
+
+
 
 	/* USER CODE END 2 */
 
