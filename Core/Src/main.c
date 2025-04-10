@@ -37,12 +37,21 @@
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
 #define STACK_SIZE 256
+#define STACK_SIZE_LONG 512
+
 #define TASK1_PRIORITY 1
 #define TASK2_PRIORITY 2
 #define TASK1_DELAY 1
 #define TASK2_DELAY 2
+
 #define QUEUE_LENGTH 5
 #define ITEM_SIZE sizeof(uint32_t)
+
+#define TASK_SHELL_STACK_DEPTH 512
+#define TASK_SHELL_PRIORITY 1
+#define TASK_LED_PRIORITY 1
+#define TASK_SPAM_PRIORITY 1
+
 
 /* USER CODE END PD */
 
@@ -61,9 +70,11 @@ QueueHandle_t xQueue;
 
 SemaphoreHandle_t xMutex;
 
-h_shell_t h_shell;
+TaskHandle_t xLedTaskHandle = NULL;
+TaskHandle_t h_task_shell = NULL;
 
-TaskHandle_t xLedTaskHandle;
+TaskHandle_t xSpamHandle = NULL;
+SemaphoreHandle_t xMutexSpam;
 
 /* USER CODE END PV */
 
@@ -142,53 +153,108 @@ int fonction(int argc, char ** argv)
 	return 0;
 }
 
+void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
+{
+	if (huart->Instance == USART1)
+	{
+		shell_uart_receive_irq_cb();	// C'est la fonction qui donne le sémaphore!
+	}
+}
+
 void led_task(void *pvParameters){
-	uint32_t period = (uint32_t) pvParameters;
-	TickType_t xLastWakeTime;
-	xLastWakeTime = xTaskGetTickCount();
-	for (;;) {
-		if (period == 0) {
-			HAL_GPIO_WritePin(LED_GPIO_Port,LED_Pin, GPIO_PIN_RESET); // LED éteinte
-		} else {
-			HAL_GPIO_TogglePin(LED_GPIO_Port, LED_Pin);
-			vTaskDelay(pdMS_TO_TICKS(period));
-		}
+	int period = (int)pvParameters;
+	while(1){
+		HAL_GPIO_WritePin(LED_GPIO_Port, LED_Pin,GPIO_PIN_SET);
+		vTaskDelay(period);
+		HAL_GPIO_WritePin(LED_GPIO_Port, LED_Pin,GPIO_PIN_RESET);
+		vTaskDelay(period);
 	}
 }
 
 int sh_led(int argc, char ** argv)
 {
-	if (argc < 2) {
-		int size;
-		size = snprintf(h_shell.print_buffer, BUFFER_SIZE, "Mettre le temps en ms\r\n");
-		h_shell.drv.transmit(h_shell.print_buffer, size);
+	if(argc>1){
+		int period = atoi(argv[1]);
+		if(period ==0){
+			if (xLedTaskHandle != NULL) {
+				vTaskDelete(xLedTaskHandle);
+				xLedTaskHandle = NULL;
+				HAL_GPIO_WritePin(LED_GPIO_Port, LED_Pin, GPIO_PIN_RESET);
+				return 0;
+			}
+		}
+		else{
+			if (xLedTaskHandle != NULL) {
+				vTaskDelete(xLedTaskHandle);
+				xLedTaskHandle = NULL;
+			}
+		}
+		BaseType_t ret = xTaskCreate(led_task, "LED_Task", STACK_SIZE_LONG, (void*)period, TASK_LED_PRIORITY, &xLedTaskHandle);
+		if (ret == pdPASS) {
+			printf("Tâche LED lancée avec une période de %d ms\r\n",period);
+		} else {
+			printf("Erreur création tâche LED\r\n");
+		}
+		return 1;
+	}
+	else{
+		printf("Erreur : ajouter la période\r\n");
 		return -1;
 	}
+}
 
-	uint32_t period = atoi(argv[2]);
+void spam_task(void *pvParameters) {
+    char* msg = ((char**)pvParameters)[0];
+    int count = atoi(((char**)pvParameters)[1]);
+    int i;
+    if (xSemaphoreTake(xMutexSpam, portMAX_DELAY) == pdPASS) {
+        for (i = 0; i < count; i++) {
+            printf("%s\r\n", msg);
+            vTaskDelay(pdMS_TO_TICKS(100));
+        }
+        xSemaphoreGive(xMutexSpam);
+    }
+    if (xSpamHandle != NULL) {
+        vTaskDelete(xSpamHandle);
+        xSpamHandle = NULL;
+    }
+}
 
-	if (xLedTaskHandle != NULL) {
-		vTaskDelete(xLedTaskHandle);
-		xLedTaskHandle = NULL;
-	}
-
-	BaseType_t ret = xTaskCreate(led_task, "LED_Task", STACK_SIZE, (void *) period, 1, &xLedTaskHandle);
-	if (ret != pdPASS) {
-		int size;
-		size = snprintf(h_shell.print_buffer, BUFFER_SIZE, "Error: Failed to create LED task\r\n");
-		h_shell.drv.transmit(h_shell.print_buffer, size);
+int sh_spam(int argc, char ** argv)
+{
+	if(argc > 2){
+		char* msg = argv[1];
+		int count = atoi(argv[2]);
+		char* params[2]={msg,count};
+		if(xMutexSpam==NULL){
+			xMutexSpam=xSemaphoreCreateMutex();
+		}
+		if(xMutexSpam!=NULL){
+			BaseType_t ret = xTaskCreate(spam_task, "SPAM_task", STACK_SIZE_LONG, (void*) params, TASK_SPAM_PRIORITY, &xSpamHandle);
+			if (ret == pdPASS) {
+				printf("Debut SPAM\r\n");
+			} else {
+				printf("Erreur création tâche SPAM\r\n");
+			}
+		} else {
+			printf("Erreur création du mutex\r\n");
+			return -1;
+		}
+		return 1;
+	} else {
+		printf("Erreur : ajouter le message et le nombre de répétitions\r\n");
 		return -1;
 	}
-
-	int size;
-	size = snprintf(h_shell.print_buffer, BUFFER_SIZE, "LED blinking with period %d ms\r\n", period);
-	h_shell.drv.transmit(h_shell.print_buffer, size);
-	return 0;
-
-
 }
 
 
+void task_shell(void * unused){
+	shell_init();
+	shell_add('f', fonction, "Une fonction inutile");
+	shell_add('l', sh_led, "Fonction LED");
+	shell_add('s', sh_spam, "Fonction SPAM");
+	shell_run();	// boucle infinie
+}
 /* USER CODE END 0 */
 
 /**
@@ -263,16 +329,18 @@ int main(void)
 
 	//vTaskStartScheduler();
 
-	h_shell.drv.receive = drv_uart1_receive;
-	h_shell.drv.transmit = drv_uart1_transmit;
-
-	shell_init(&h_shell);
-	shell_add(&h_shell, 'f', fonction, "Une fonction inutile");
-	shell_add(&h_shell, 'l', sh_led, "LED blink with period in ms");
-	shell_run(&h_shell);
+	HAL_GPIO_WritePin(LED_GPIO_Port, LED_Pin,GPIO_PIN_SET);
+	HAL_Delay(500);
+	HAL_GPIO_WritePin(LED_GPIO_Port, LED_Pin,GPIO_PIN_RESET);
 
 
+	if (xTaskCreate(task_shell, "Shell", TASK_SHELL_STACK_DEPTH, NULL, TASK_SHELL_PRIORITY, &h_task_shell) != pdPASS)
+	{
+		printf("Error creating task shell\r\n");
+		Error_Handler();
+	}
 
+	vTaskStartScheduler();
 	/* USER CODE END 2 */
 
 	/* Call init function for freertos objects (in cmsis_os2.c) */
