@@ -171,7 +171,6 @@
 		<project id="tp_amal_mariam_rtos.null.342917410" name="tp_amal_mariam_rtos"/>
 	</storageModule>
 	<storageModule moduleId="org.eclipse.cdt.core.LanguageSettingsProviders"/>
-	<storageModule moduleId="org.eclipse.cdt.make.core.buildtargets"/>
 	<storageModule moduleId="scannerConfiguration">
 		<autodiscovery enabled="true" problemReportingEnabled="true" selectedProfileId=""/>
 		<scannerConfigBuildInfo instanceId="com.st.stm32cube.ide.mcu.gnu.managedbuild.config.exe.debug.812746753;com.st.stm32cube.ide.mcu.gnu.managedbuild.config.exe.debug.812746753.;com.st.stm32cube.ide.mcu.gnu.managedbuild.tool.c.compiler.40713870;com.st.stm32cube.ide.mcu.gnu.managedbuild.tool.c.compiler.input.c.2131561156">
@@ -182,4 +181,7 @@
 		</scannerConfigBuildInfo>
 	</storageModule>
 	<storageModule moduleId="refreshScope"/>
+	<storageModule moduleId="org.eclipse.cdt.make.core.buildtargets">
+		<buildTargets/>
+	</storageModule>
 </cproject>

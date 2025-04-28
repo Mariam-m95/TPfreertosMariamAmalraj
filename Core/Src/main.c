@@ -38,6 +38,7 @@
 /* USER CODE BEGIN PD */
 #define STACK_SIZE 256
 #define STACK_SIZE_LONG 512
+#define STACK_SIZE_ERROR 100
 
 #define TASK1_PRIORITY 1
 #define TASK2_PRIORITY 2
@@ -51,6 +52,7 @@
 #define TASK_SHELL_PRIORITY 1
 #define TASK_LED_PRIORITY 1
 #define TASK_SPAM_PRIORITY 1
+#define TASK_OVER_PRIORITY 1
 
 
 /* USER CODE END PD */
@@ -75,6 +77,15 @@ TaskHandle_t h_task_shell = NULL;
 
 TaskHandle_t xSpamHandle = NULL;
 SemaphoreHandle_t xMutexSpam;
+
+TaskHandle_t xOverflowHandle = NULL;
+
+typedef struct{
+	char* msg;
+	int count;
+}SpamParams;
+
+static SpamParams spam_params;
 
 /* USER CODE END PV */
 
@@ -105,13 +116,17 @@ void BlinkTask(void *argument)
 
 void taskGive(void *pvParameters)
 {
-	uint32_t timerValue = 0; // Valeur à envoyer dans la queue
+	uint32_t timerValue = 0;
 	for (;;)
 	{
 		printf("taskGive : avant envoi à la queue\r\n");
 		if (xQueueSend(xQueue, &timerValue, portMAX_DELAY) == pdPASS)
 		{
 			printf("taskGive : valeur envoyée : %u\r\n", timerValue);
+		}
+		else{
+			printf("Erreur envoie de la queue\r\n");
+			Error_Handler();
 		}
 		timerValue++;
 		vTaskDelay(pdMS_TO_TICKS(100));
@@ -127,6 +142,11 @@ void taskTake(void *pvParameters)
 		if (xQueueReceive(xQueue, &receivedValue, portMAX_DELAY) == pdPASS)
 		{
 			printf("taskTake : valeur reçue : %u\r\n", receivedValue);
+			Error_Handler();
+		}
+		else{
+			printf("Erreur valeur non reçue\r\n");
+			Error_Handler();
 		}
 	}
 }
@@ -141,6 +161,11 @@ void task_bug(void * pvParameters)
 			printf("Je suis %s et je m'endors pour %d ticks\r\n",
 					pcTaskGetName(NULL), delay);
 			xSemaphoreGive(xMutex);
+			Error_Handler();
+		}
+		else{
+			printf("Erreur Semaphore Mutex");
+			Error_Handler();
 		}
 		vTaskDelay(pdMS_TO_TICKS(delay));
 	}
@@ -149,7 +174,6 @@ void task_bug(void * pvParameters)
 int fonction(int argc, char ** argv)
 {
 	printf("Je suis une fonction bidon\r\n");
-
 	return 0;
 }
 
@@ -157,7 +181,10 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 {
 	if (huart->Instance == USART1)
 	{
-		shell_uart_receive_irq_cb();	// C'est la fonction qui donne le sémaphore!
+		shell_uart_receive_irq_cb();
+	}
+	else{
+		Error_Handler();
 	}
 }
 
@@ -194,58 +221,104 @@ int sh_led(int argc, char ** argv)
 			printf("Tâche LED lancée avec une période de %d ms\r\n",period);
 		} else {
 			printf("Erreur création tâche LED\r\n");
+			Error_Handler();
 		}
 		return 1;
 	}
 	else{
 		printf("Erreur : ajouter la période\r\n");
+		Error_Handler();
 		return -1;
 	}
 }
 
 void spam_task(void *pvParameters) {
-    char* msg = ((char**)pvParameters)[0];
-    int count = atoi(((char**)pvParameters)[1]);
-    int i;
-    if (xSemaphoreTake(xMutexSpam, portMAX_DELAY) == pdPASS) {
-        for (i = 0; i < count; i++) {
-            printf("%s\r\n", msg);
-            vTaskDelay(pdMS_TO_TICKS(100));
-        }
-        xSemaphoreGive(xMutexSpam);
-    }
-    if (xSpamHandle != NULL) {
-        vTaskDelete(xSpamHandle);
-        xSpamHandle = NULL;
-    }
+	SpamParams *params = (SpamParams*) pvParameters;
+	char* msg = params->msg;
+	int count = params->count;
+	int i;
+
+	if (xMutexSpam == NULL) {
+		xMutexSpam = xSemaphoreCreateMutex();
+	}
+
+	if (xMutexSpam != NULL) {
+		if (xSemaphoreTake(xMutexSpam, portMAX_DELAY) == pdPASS) {
+			for (i = 0; i < count; i++) {
+				printf("%s\r\n", msg);
+				vTaskDelay(pdMS_TO_TICKS(100));
+			}
+			xSemaphoreGive(xMutexSpam);
+		}
+	} else {
+		printf("Erreur création du mutex\r\n");
+		Error_Handler();
+	}
+
+	if (xSpamHandle != NULL) {
+		vTaskDelete(xSpamHandle);
+		xSpamHandle = NULL;
+	}
 }
 
-int sh_spam(int argc, char ** argv)
-{
-	if(argc > 2){
-		char* msg = argv[1];
-		int count = atoi(argv[2]);
-		char* params[2]={msg,count};
-		if(xMutexSpam==NULL){
-			xMutexSpam=xSemaphoreCreateMutex();
+int sh_spam(int argc, char **argv) {
+	if (argc > 2) {
+		spam_params.msg = argv[1];
+		spam_params.count = atoi(argv[2]);
+
+		if (xMutexSpam == NULL) {
+			xMutexSpam = xSemaphoreCreateMutex();
 		}
-		if(xMutexSpam!=NULL){
-			BaseType_t ret = xTaskCreate(spam_task, "SPAM_task", STACK_SIZE_LONG, (void*) params, TASK_SPAM_PRIORITY, &xSpamHandle);
-			if (ret == pdPASS) {
-				printf("Debut SPAM\r\n");
-			} else {
-				printf("Erreur création tâche SPAM\r\n");
+
+		if (xMutexSpam != NULL) {
+			if (xSemaphoreTake(xMutexSpam, portMAX_DELAY) == pdPASS) {
+				BaseType_t ret = xTaskCreate(spam_task, "SPAM_task", STACK_SIZE_LONG, (void*)&spam_params, TASK_SPAM_PRIORITY, &xSpamHandle);
+				if (ret == pdPASS) {
+					printf("Debut SPAM : \r\n");
+				} else {
+					printf("Erreur création tâche SPAM\r\n");
+					Error_Handler();
+				}
+				xSemaphoreGive(xMutexSpam);
 			}
 		} else {
 			printf("Erreur création du mutex\r\n");
+			Error_Handler();
 			return -1;
 		}
 		return 1;
 	} else {
 		printf("Erreur : ajouter le message et le nombre de répétitions\r\n");
+		Error_Handler();
 		return -1;
 	}
 }
+
+void overflow_task(void *pvParameters)
+{
+    printf("Démarrage de la tâche Overflow...\r\n");
+
+    while (1) {
+            char large_array[1000];
+            printf("Taille de tableau: %d bytes\r\n", sizeof(large_array));
+            vTaskDelay(pdMS_TO_TICKS(1000));
+        }
+}
+
+int sh_overflow(int argc, char **argv)
+{
+	BaseType_t ret = xTaskCreate(overflow_task, "Overflow_task", STACK_SIZE_ERROR, NULL, TASK_OVER_PRIORITY, &xOverflowHandle);
+
+    if (ret == pdPASS) {
+        printf("Tâche Overflow créée avec succès !\r\n");
+    } else {
+        printf("Erreur création tâche Overflow.\r\n");
+        Error_Handler();
+    }
+
+    return 1;
+}
+
 
 
 void task_shell(void * unused){
@@ -253,6 +326,7 @@ void task_shell(void * unused){
 	shell_add('f', fonction, "Une fonction inutile");
 	shell_add('l', sh_led, "Fonction LED");
 	shell_add('s', sh_spam, "Fonction SPAM");
+	shell_add('o',sh_overflow, "Fonction Overflow");
 	shell_run();	// boucle infinie
 }
 /* USER CODE END 0 */

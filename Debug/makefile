@@ -1,6 +1,6 @@
 ################################################################################
 # Automatically-generated file. Do not edit!
-# Toolchain: GNU Tools for STM32 (12.3.rel1)
+# Toolchain: GNU Tools for STM32 (13.3.rel1)
 ################################################################################
 
 -include ../makefile.init
@@ -64,8 +64,8 @@ all: main-build
 main-build: tp_amal_mariam_rtos.elf secondary-outputs
 
 # Tool invocations
-tp_amal_mariam_rtos.elf tp_amal_mariam_rtos.map: $(OBJS) $(USER_OBJS) C:\Users\etudiant.e\Desktop\A_TRANSFERER\ENSEA\S10\noyau_tr\TP\STM32F746NGHX_FLASH.ld makefile objects.list $(OPTIONAL_TOOL_DEPS)
-	arm-none-eabi-gcc -o "tp_amal_mariam_rtos.elf" @"objects.list" $(USER_OBJS) $(LIBS) -mcpu=cortex-m7 -T"C:\Users\etudiant.e\Desktop\A_TRANSFERER\ENSEA\S10\noyau_tr\TP\STM32F746NGHX_FLASH.ld" --specs=nosys.specs -Wl,-Map="tp_amal_mariam_rtos.map" -Wl,--gc-sections -static --specs=nano.specs -mfpu=fpv5-sp-d16 -mfloat-abi=hard -mthumb -Wl,--start-group -lc -lm -Wl,--end-group
+tp_amal_mariam_rtos.elf tp_amal_mariam_rtos.map: $(OBJS) $(USER_OBJS) C:\Users\etudiant\Desktop\ensea\S10\noyau_tr\TP\STM32F746NGHX_FLASH.ld makefile objects.list $(OPTIONAL_TOOL_DEPS)
+	arm-none-eabi-gcc -o "tp_amal_mariam_rtos.elf" @"objects.list" $(USER_OBJS) $(LIBS) -mcpu=cortex-m7 -T"C:\Users\etudiant\Desktop\ensea\S10\noyau_tr\TP\STM32F746NGHX_FLASH.ld" --specs=nosys.specs -Wl,-Map="tp_amal_mariam_rtos.map" -Wl,--gc-sections -static --specs=nano.specs -mfpu=fpv5-sp-d16 -mfloat-abi=hard -mthumb -Wl,--start-group -lc -lm -Wl,--end-group
 	@echo 'Finished building target: $@'
 	@echo ' '
 
