@@ -21,22 +21,30 @@
 TOTAL_HEAP_SIZE, qui est de 15360 bytes, définit la taille totale de la mémoire dynamique que FreeRTOS peut utiliser pour créer des tâches, des files d'attente, des sémaphores, etc.
 On peut avoir au maximum 56 priorités. La taille de la Queue Register est de 8.
 
-2.![image](https://github.com/user-attachments/assets/8fe595c6-f6e4-4d8d-b314-4f43a5499690)
+2. La macro portTICK_PERIOD_MS permet de convertir des millisecondes en "ticks" du système FreeRTOS.
+
+![image](https://github.com/user-attachments/assets/8fe595c6-f6e4-4d8d-b314-4f43a5499690)
 ![image](https://github.com/user-attachments/assets/afbb2587-fa6c-4289-acd5-cf90f2618815)
-La macro portTICK_PERIOD_MS permet de convertir des millisecondes en "ticks" du système FreeRTOS.
+
 
 ### 1.2 Sémaphores pour la synchronisation
 
-3. ![image](https://github.com/user-attachments/assets/293aaca9-81b6-4feb-a123-5cb9d67c0b23)
-4. Pour tester le mécanisme d'erreur, on lance le taskGive avec un délai au dessus de 1 sec, soit le temps après lequel on fait le reset software.
+3. On crée 2 tâches, avec 2 priorités différentes.TaskGive donne un sémaphore toutes les 100ms.
+![image](https://github.com/user-attachments/assets/293aaca9-81b6-4feb-a123-5cb9d67c0b23)
 ![image](https://github.com/user-attachments/assets/26cdac09-6905-406a-b0b5-0c6b0f79cb4c)
-5.![sortie](https://github.com/user-attachments/assets/72c83bdd-3c2f-4987-9e4d-c8a4267bd074)
+![sortie](https://github.com/user-attachments/assets/72c83bdd-3c2f-4987-9e4d-c8a4267bd074)
+
+Pour tester le mécanisme d'erreur, on lance le taskGive avec un délai au dessus de 1 sec, soit le temps après lequel on fait le reset software.
+
 6.Quand taskGive faisait xSemaphoreGive(), FreeRTOS interrompait immédiatement taskGive pour faire tourner taskTake.
 Maintenant : taskGive prioritaire
 Quand taskGive donne le sémaphore, taskTake devient "prête à s'exécuter" (car elle attendait le sémaphore), mais ne s'exécute pas immédiatement. 
+
 ![image](https://github.com/user-attachments/assets/86504e3f-24be-4069-b6c3-66659c8216e3)
 
 ### 1.3 Notification
+
+7. On utilise des task notifications au lieu de sémpahores :
 
 ![image](https://github.com/user-attachments/assets/25083b87-0a71-4827-86dd-97e0390a7218)
 ![image](https://github.com/user-attachments/assets/ac20d529-5f00-48d7-827d-37da5225891c)
@@ -51,10 +59,13 @@ Quand taskGive donne le sémaphore, taskTake devient "prête à s'exécuter" (ca
 ### 1.5 Réentrance et exclusion mutuelle
 
 10. Ici on observe ceci :
+11. 
 ![image](https://github.com/user-attachments/assets/bda20e30-07d1-406b-bad2-6e0527bda6c9)
+
 La fonction printf utilise une ressource partagée (la sortie série, en général), ce qui signifie que plusieurs tâches peuvent vouloir y accéder simultanément pour afficher des informations à l'écran ou dans la console. Les sorties de printf peuvent être mélangées, c'est-à-dire que la sortie de l'une des tâches pourrait être partiellement écrite avant que l'autre tâche commence à afficher sa propre sortie.
 
 On utilise le mutex pour protéger l'accès à printf
+
 ![image](https://github.com/user-attachments/assets/12fd6d3b-cbe3-441e-8315-b4db1f66e14b)
 
 ## 2. On joue avec le Shell
@@ -67,18 +78,15 @@ On utilise le mutex pour protéger l'accès à printf
 1.5sdsds
 2.
 3. On doit créer 2 tâches, une pour le shell_run, une pour la led.
+   
 ![image](https://github.com/user-attachments/assets/ee6ced62-f1f5-4b46-ab11-e8642fc201fd)
 ![image](https://github.com/user-attachments/assets/82ef2d4e-d948-42d0-9cec-722a55cb0752)
 ![image](https://github.com/user-attachments/assets/02b8714e-b67e-49bb-be45-e9d387d2358c)
 
-4.
-![image](https://github.com/user-attachments/assets/e7486ac9-aea9-447f-8769-f3b09f7a4e2d)
-ca bloque
-![image](https://github.com/user-attachments/assets/3ea7819d-836c-42a7-8200-5c6059432e84)
+4. On crée la fonction spam pour la tache et le shell :
 
-
-![alt text](image.png)
-///////////////////////IMAGE/////////////////////
+![image](https://github.com/user-attachments/assets/9cd51052-0d1d-4d22-a42b-075f8456dc15)
+![image](https://github.com/user-attachments/assets/b6b1c313-359f-4ef6-be41-08a8e9dd9bcd)
 
 ## 3. Debug, gestion d'erreur et statistiques
 
@@ -86,3 +94,36 @@ ca bloque
 
 1. HEAP
 2. FreeRTOS
+4. Taille RAM initiale :
+
+![image](https://github.com/user-attachments/assets/33e749ea-0851-480b-8881-4850ca153cae)
+
+5. On crée une tâche bidon pour avoir des erreurs:
+
+![image](https://github.com/user-attachments/assets/28849a55-e10a-46a1-ace4-b5172061228a)
+![image](https://github.com/user-attachments/assets/02a792b2-c5a3-4c38-957f-08a44702f48d)
+
+La taille de la mémoire ne change pas, mais le bss et data augmentent :
+
+![image](https://github.com/user-attachments/assets/62c9156d-c0d1-406e-a2e1-0dfc486f5ef2)
+
+7. on augmente la taille à 30720 bytes et voici la nouvelle utilisation mémoire :
+
+![image](https://github.com/user-attachments/assets/6aee2597-aca8-4a17-a997-a2688c293613)
+
+FreeRTOS alloue un tableau statique de la taille configurée dans la RAM, ce qui explique pourquoi on passe de 5 à 10%/ 
+
+### 3.2 Gestion des piles
+
+2. On configure CHECK_FOR_SYACK_OVERFLOW avec la méthode 2
+
+3. ![image](https://github.com/user-attachments/assets/2ebfc6af-ffbe-47ca-adeb-39b0df2410dc)
+
+
+### 3.3 Statistiques dans l'IDE
+
+3.3.6. Pour afficher le taux d'utilisation du CPU, on ajoute le TIMER 6 et on active l'interruption sur ce timer, puis on ajoute le code suivant:
+
+### 3.4 Affichage des statistiques dans le shell
+
+
