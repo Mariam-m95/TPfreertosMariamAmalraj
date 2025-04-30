@@ -19,6 +19,7 @@
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
 #include "cmsis_os.h"
+#include "tim.h"
 #include "usart.h"
 #include "gpio.h"
 
@@ -47,6 +48,7 @@
 
 #define QUEUE_LENGTH 5
 #define ITEM_SIZE sizeof(uint32_t)
+
 
 #define TASK_SHELL_STACK_DEPTH 512
 #define TASK_SHELL_PRIORITY 1
@@ -79,6 +81,7 @@ TaskHandle_t xSpamHandle = NULL;
 SemaphoreHandle_t xMutexSpam;
 
 TaskHandle_t xOverflowHandle = NULL;
+SemaphoreHandle_t xMutexPrint;
 
 typedef struct{
 	char* msg;
@@ -296,29 +299,84 @@ int sh_spam(int argc, char **argv) {
 
 void overflow_task(void *pvParameters)
 {
-    printf("Démarrage de la tâche Overflow...\r\n");
+	if (xMutexPrint != NULL && xSemaphoreTake(xMutexPrint, portMAX_DELAY) == pdPASS) {
+		printf("Démarrage de la tâche Overflow...\r\n");
+		xSemaphoreGive(xMutexPrint);
+	}
 
-    while (1) {
-            char large_array[1000];
-            printf("Taille de tableau: %d bytes\r\n", sizeof(large_array));
-            vTaskDelay(pdMS_TO_TICKS(1000));
-        }
+	volatile char array[2000];
+	int i;
+	for(i = 0; i < 2000; i++) {
+		array[i] = (char)i;
+	}
+
+	if (xMutexPrint != NULL && xSemaphoreTake(xMutexPrint, portMAX_DELAY) == pdPASS) {
+		printf("Fin de la tâche Overflow\r\n");
+		xSemaphoreGive(xMutexPrint);
+	}
+
+	vTaskDelete(NULL);
 }
 
 int sh_overflow(int argc, char **argv)
 {
-	BaseType_t ret = xTaskCreate(overflow_task, "Overflow_task", STACK_SIZE_ERROR, NULL, TASK_OVER_PRIORITY, &xOverflowHandle);
+	BaseType_t ret = xTaskCreate(overflow_task, "Overflow_task", STACK_SIZE_ERROR, NULL,
+			TASK_OVER_PRIORITY, &xOverflowHandle);
 
-    if (ret == pdPASS) {
-        printf("Tâche Overflow créée avec succès !\r\n");
-    } else {
-        printf("Erreur création tâche Overflow.\r\n");
-        Error_Handler();
-    }
+	if (xMutexPrint != NULL && xSemaphoreTake(xMutexPrint, portMAX_DELAY) == pdPASS) {
+		if (ret == pdPASS) {
+			printf("Tâche Overflow créée avec succès !\r\n");
+		} else {
+			printf("Erreur création tâche Overflow.\r\n");
+			Error_Handler();
+		}
+		xSemaphoreGive(xMutexPrint);
+	}
 
-    return 1;
+	return 1;
 }
 
+void vApplicationStackOverflowHook(TaskHandle_t xTask, char *pcTaskName)
+{
+	printf("Stack overflow détecté dans la tâche : %s\r\n", pcTaskName);
+	Error_Handler();
+}
+
+
+void configureTimerForRunTimeStats(void)
+{
+	HAL_TIM_Base_Start_IT(&htim6);
+}
+
+void stats_task(void *pvParameters)
+{
+	char stats_buffer[512];
+	char task_list_buffer[512];
+
+	printf("\r\n=== Liste des tâches (vTaskList) ===\r\n");
+	vTaskList(task_list_buffer);
+	printf("Nom\tEtat\tPriorité\tStack\tN°\r\n");
+	printf("%s\r\n", task_list_buffer);
+
+	printf("=== Statistiques d'exécution (vTaskGetRunTimeStats) ===\r\n");
+	vTaskGetRunTimeStats(stats_buffer);
+	printf("Nom\tTemps\t\t%% CPU\r\n");
+	printf("%s\r\n", stats_buffer);
+
+	vTaskDelay(pdMS_TO_TICKS(2000));
+}
+
+int sh_stats(int argc, char **argv)
+{
+	BaseType_t ret = xTaskCreate(stats_task, "Stats_task", 512, NULL, tskIDLE_PRIORITY + 1, NULL);
+	if (ret == pdPASS) {
+		//printf("Tâche de statistiques lancée.\r\n");
+	} else {
+		//printf("Erreur création tâche de statistiques.\r\n");
+		Error_Handler();
+	}
+	return 0;
+}
 
 
 void task_shell(void * unused){
@@ -326,9 +384,19 @@ void task_shell(void * unused){
 	shell_add('f', fonction, "Une fonction inutile");
 	shell_add('l', sh_led, "Fonction LED");
 	shell_add('s', sh_spam, "Fonction SPAM");
-	shell_add('o',sh_overflow, "Fonction Overflow");
+	shell_add('e',sh_stats, "Fonction Stats");
+	//shell_add('o',sh_overflow, "Fonction Overflow");
 	shell_run();	// boucle infinie
 }
+
+
+extern volatile unsigned long ulHighFrequencyTimerTicks;
+
+unsigned long getRunTimeCounterValue(void)
+{
+	return ulHighFrequencyTimerTicks++;
+}
+
 /* USER CODE END 0 */
 
 /**
@@ -361,37 +429,45 @@ int main(void)
 	/* Initialize all configured peripherals */
 	MX_GPIO_Init();
 	MX_USART1_UART_Init();
+	MX_TIM6_Init();
 	/* USER CODE BEGIN 2 */
 
 	//HAL_GPIO_WritePin(LED_GPIO_Port, LED_Pin, GPIO_PIN_SET);
 
-	//BaseType_t ret;
+	BaseType_t ret;
+	//
+	//	xTaskCreate(BlinkTask, "LED_Task", TASK_STACK, NULL, BLINK_TASK_PRIORITY, NULL);
 
-	//xTaskCreate(BlinkTask, "LED_Task", TASK_STACK, NULL, BLINK_TASK_PRIORITY, NULL);
-	//
-	//	xSemaphore = xSemaphoreCreateBinary();
-	//
+
+	////////Semaphore
+	xSemaphore = xSemaphoreCreateBinary();
+
 	//	if(xSemaphore!=NULL)
 	//	{
-	//		xTaskCreate(taskGive, "Give", TASK_STACK,NULL,2,NULL);
-	//		xTaskCreate(taskTake, "Take", TASK_STACK,NULL,1,NULL);
+	//		xTaskCreate(taskGive, "Give", STACK_SIZE,NULL,2,NULL);
+	//		xTaskCreate(taskTake, "Take", STACK_SIZE,NULL,1,NULL);
 	//
 	//		vTaskStartScheduler();
 	//	}
+
+	////////////Queues
+	char stats_buffer[512];  // Taille suffisante
+	vTaskGetRunTimeStats(stats_buffer);
+	printf("%s\r\n", stats_buffer);
 
 
 	//	xQueue = xQueueCreate(QUEUE_LENGTH, ITEM_SIZE);
 	//	configASSERT(xQueue!=NULL);
 	//
-	//    ret = xTaskCreate(taskTake, "taskTake", STACK_SIZE, NULL, 2, &taskTakeHandle);
-	//    configASSERT(ret == pdPASS);
+	//	ret = xTaskCreate(taskTake, "taskTake", STACK_SIZE, NULL, 2, &taskTakeHandle);
+	//	configASSERT(ret == pdPASS);
 	//
-	//    ret = xTaskCreate(taskGive, "taskGive", STACK_SIZE, NULL, 1, NULL);
-	//    configASSERT(ret == pdPASS);
+	//	ret = xTaskCreate(taskGive, "taskGive", STACK_SIZE, NULL, 1, NULL);
+	//	configASSERT(ret == pdPASS);
 	//
-	//    vTaskStartScheduler();
+	//	vTaskStartScheduler();
 
-	//
+
 	//	xMutex = xSemaphoreCreateMutex();
 	//	configASSERT(xMutex != NULL);
 	//
@@ -403,16 +479,20 @@ int main(void)
 
 	//vTaskStartScheduler();
 
-	HAL_GPIO_WritePin(LED_GPIO_Port, LED_Pin,GPIO_PIN_SET);
-	HAL_Delay(500);
-	HAL_GPIO_WritePin(LED_GPIO_Port, LED_Pin,GPIO_PIN_RESET);
 
+	xMutexPrint = xSemaphoreCreateMutex();
+	if (xMutexPrint == NULL) {
+		Error_Handler();  // Création mutex échouée
+	}
+
+	//////////////SHELL
 
 	if (xTaskCreate(task_shell, "Shell", TASK_SHELL_STACK_DEPTH, NULL, TASK_SHELL_PRIORITY, &h_task_shell) != pdPASS)
 	{
 		printf("Error creating task shell\r\n");
 		Error_Handler();
 	}
+
 
 	vTaskStartScheduler();
 	/* USER CODE END 2 */
@@ -429,14 +509,6 @@ int main(void)
 	/* USER CODE BEGIN WHILE */
 	while (1)
 	{
-		//		if(	HAL_GPIO_ReadPin(BTN_USER_GPIO_Port, BTN_USER_Pin) == GPIO_PIN_SET){
-		//			HAL_GPIO_WritePin(LED_GPIO_Port, LED_Pin,GPIO_PIN_SET);
-		//		}
-		//		else{
-		//			HAL_GPIO_WritePin(LED_GPIO_Port, LED_Pin, GPIO_PIN_RESET);
-		//		}
-
-
 
 		/* USER CODE END WHILE */
 
@@ -514,6 +586,8 @@ void Error_Handler(void)
 	__disable_irq();
 	while (1)
 	{
+		printf("ERREUR\r\n");
+		HAL_Delay(500);
 	}
 	/* USER CODE END Error_Handler_Debug */
 }
